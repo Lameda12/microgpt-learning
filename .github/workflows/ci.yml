@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install CPU-only PyTorch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Byte-compile every script
+        run: python -m py_compile *.py
+      - name: Train a few steps and save a checkpoint
+        run: python shakespeare_pytorch.py --max-iters 20 --eval-interval 10 --eval-iters 2 --sample-tokens 50 --out /tmp/ckpt.pt
+      - name: Sample from the checkpoint
+        run: |
+          python generate.py --ckpt /tmp/ckpt.pt -n 50 --seed 0 "ROMEO:"
+          echo "JULIET:" | python generate.py --ckpt /tmp/ckpt.pt -n 20 -
+      - name: Bench harness runs end to end
+        run: python bench.py --label ci --seeds 0 --max-iters 20 --eval-interval 10 --eval-iters 2 --target 4.0
