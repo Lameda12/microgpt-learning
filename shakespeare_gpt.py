@@ -20,15 +20,18 @@ if not os.path.exists('shakespeare.txt'):
 # Read Shakespeare text
 text = open('shakespeare.txt', 'r', encoding='utf-8').read()
 
-# Instead of short lines, we'll train on chunks of 100 characters.
+# Instead of short lines, we'll train on fixed-size chunks of the play.
 # The original script trained on full lines (names), but a play is continuous.
-chunk_size = 100 # Adjust if needed
+# chunk_size must equal block_size below: the model only ever sees block_size tokens,
+# so any longer chunk would silently throw away everything past position block_size.
+chunk_size = 16
 docs = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size) if len(text[i:i+chunk_size]) == chunk_size]
 random.shuffle(docs)
 print(f"num docs: {len(docs)}")
 
 # Let there be a Tokenizer to translate strings to sequences of integers ("tokens") and back
 uchars = sorted(set(''.join(docs))) # unique characters in the dataset become token ids 0..n-1
+stoi = {ch: i for i, ch in enumerate(uchars)} # O(1) char -> id lookup
 BOS = len(uchars) # token id for a special Beginning of Sequence (BOS) token
 vocab_size = len(uchars) + 1 # total number of unique tokens, +1 is for BOS
 print(f"vocab size: {vocab_size}")
@@ -81,7 +84,7 @@ class Value:
 # Initialize the parameters, to store the knowledge of the model
 n_layer = 1     # depth of the transformer neural network (number of layers)
 n_embd = 16     # width of the network (embedding dimension)
-block_size = 16 # maximum context length of the attention window (note: the longest name is 15 characters)
+block_size = 16 # maximum context length of the attention window (must match chunk_size above)
 n_head = 4      # number of attention heads
 head_dim = n_embd // n_head # derived dimension of each head
 matrix = lambda nout, nin, std=0.08: [[Value(random.gauss(0, std)) for _ in range(nin)] for _ in range(nout)]
@@ -159,9 +162,10 @@ v = [0.0] * len(params) # second moment buffer
 num_steps = 1000 # number of training steps
 for step in range(num_steps):
 
-    # Take single document, tokenize it, surround it with BOS special token on both sides
+    # Take a single chunk and prefix it with BOS. No trailing BOS: a chunk ends mid-play,
+    # not at the end of a document (and with n capped at block_size it was never a target anyway).
     doc = docs[step % len(docs)]
-    tokens = [BOS] + [uchars.index(ch) for ch in doc] + [BOS]
+    tokens = [BOS] + [stoi[ch] for ch in doc]
     n = min(block_size, len(tokens) - 1)
 
     # Forward the token sequence through the model, building up the computation graph all the way to the loss
@@ -192,7 +196,7 @@ for step in range(num_steps):
 
 # Inference: may the model babble back to us
 temperature = 0.5 # in (0, 1], control the "creativity" of generated text, low to high
-print("\n--- inference (new, hallucinated names) ---")
+print("\n--- inference (new, hallucinated Shakespeare) ---")
 for sample_idx in range(20):
     keys, values = [[] for _ in range(n_layer)], [[] for _ in range(n_layer)]
     token_id = BOS
